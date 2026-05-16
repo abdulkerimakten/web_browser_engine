@@ -103,8 +103,9 @@ class URL:
         else:
             key = (self.scheme, self.host, self.port)
 
+            # Socket Manipulation
             if key in SOCKETS:
-                s = SOCKETS[key]
+                s, response = SOCKETS[key]
                 print("-------------------....REUSE SOCKET....-------------------")
             else:
                 s = socket.socket(
@@ -116,10 +117,12 @@ class URL:
                 if self.scheme == "https":
                     ctx = ssl.create_default_context()
                     s = ctx.wrap_socket(s, server_hostname=self.host)
-                # add new socket
-                SOCKETS[key] = s
+                # add new socket and response to reuse them in future
+                response = s.makefile("rb")
+                SOCKETS[key] = s, response
                 print("-------------------...OPEN NEW SOCKET...-------------------")
 
+            # Request Manipulation
             headers = {
                 "Host": self.host,
                 "Connection": "keep-alive",
@@ -133,8 +136,7 @@ class URL:
             # Send Request
             s.send(request.encode("utf8"))
 
-            # RESPONSE MANIPULATION
-            response = s.makefile("rb")
+            # Response Manipulation
             statusline = response.readline().decode("utf-8")
             version, status, explanation = statusline.split(" ", 2)
 
@@ -160,4 +162,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         load(URL(sys.argv[1]))
     else:
-        load(URL(DEFAULT_URL))
+        # load(URL(DEFAULT_URL))
+        load(URL("http://browser.engineering/"))
+        load(URL("http://browser.engineering/http.html"))
