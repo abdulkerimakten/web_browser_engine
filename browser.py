@@ -1,6 +1,8 @@
 import socket
 import ssl
 import os
+SOCKETS = {}
+
 
 DEFAULT_FILE = os.path.join(os.path.dirname(__file__), "test.html")
 DEFAULT_URL = "file:///" + DEFAULT_FILE.replace("\\", "/") 
@@ -88,8 +90,7 @@ class URL:
                 self.host, port = self.host.split(":", 1)
                 self.port = int(port)
     
-    def request(self):
-        
+    def request(self):        
         if self.scheme == "data":
             content = self.body
             return "200", {}, content
@@ -100,20 +101,28 @@ class URL:
             return "200", {}, content
         
         else:
+            key = (self.scheme, self.host, self.port)
 
-            s = socket.socket(
-                family=socket.AF_INET,
-                type=socket.SOCK_STREAM,
-                proto=socket.IPPROTO_TCP,
-            )
-            s.connect((self.host, self.port))
-            if self.scheme == "https":
-                ctx = ssl.create_default_context()
-                s = ctx.wrap_socket(s, server_hostname=self.host)
+            if key in SOCKETS:
+                s = SOCKETS[key]
+                print("-------------------....REUSE SOCKET....-------------------")
+            else:
+                s = socket.socket(
+                    family=socket.AF_INET,
+                    type=socket.SOCK_STREAM,
+                    proto=socket.IPPROTO_TCP,
+                )
+                s.connect((self.host, self.port))
+                if self.scheme == "https":
+                    ctx = ssl.create_default_context()
+                    s = ctx.wrap_socket(s, server_hostname=self.host)
+                # add new socket
+                SOCKETS[key] = s
+                print("-------------------...OPEN NEW SOCKET...-------------------")
 
             headers = {
                 "Host": self.host,
-                "Connection": "close",
+                "Connection": "keep-alive",
                 "User-Agent": "KerimBrowser"
             }
             # Start with the Method Path Version
@@ -124,22 +133,25 @@ class URL:
             # Send Request
             s.send(request.encode("utf8"))
 
-            response = s.makefile("r", encoding="utf8", newline="\r\n")
-            statusline = response.readline()
+            # RESPONSE MANIPULATION
+            response = s.makefile("rb")
+            statusline = response.readline().decode("utf-8")
             version, status, explanation = statusline.split(" ", 2)
 
             response_headers = {}
             while True:
                 line = response.readline()
-                if line == "\r\n" : break
+                if line == b"\r\n" :
+                    break
+                line = line.decode("utf-8")
                 header, value = line.split(":", 1)
                 response_headers[header.casefold()] = value.strip()
 
             assert "transfer-encoding" not in response_headers
             assert "content-encoding" not in response_headers
 
-            content = response.read()
-            s.close()
+            content_len = int(response_headers["content-length"])
+            content = response.read(content_len).decode("utf-8")
 
         return status, response_headers, content
     
