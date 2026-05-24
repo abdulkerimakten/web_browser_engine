@@ -3,24 +3,33 @@ import ssl
 import os
 import time
 import gzip
+import tkinter
+
+WIDTH, HEIGHT = 800, 600
+HSTEP, VSTEP = 13, 18
+SCROLL_STEP = 100
 
 SOCKETS = {}
 CACHE = {}
 
-
 DEFAULT_FILE = os.path.join(os.path.dirname(__file__), "test.html")
-DEFAULT_URL = "file:///" + DEFAULT_FILE.replace("\\", "/") 
+DEFAULT_URL = "file:///" + DEFAULT_FILE.replace("\\", "/")
 
-def show(body):
+
+
+"""     **********        STANDALONE METHODS       **********       """
+
+def lex(body):
+    text = ""
     in_tag = False
     i = 0
     while i < len(body):
         if body[i:i+4] == "&lt;": 
-            print("<", end="")
+            text += "<"
             i += 4
             continue
         elif body[i:i+4] == "&gt;":
-            print(">", end="")
+            text += ">"
             i += 4
             continue
         elif body[i] == "<":
@@ -28,34 +37,32 @@ def show(body):
         elif body[i] == ">":
             in_tag = False
         elif not in_tag:
-            print(body[i], end="")
+            text += body[i]
         i += 1
-        
 
+    return text
 
-def load(url, redirects=0):
+def layout(text):
     
-    status, headers, body = url.request()
+    display_list = []
+    cursor_x, cursor_y = HSTEP, VSTEP
+    for c in text:
+        if c == "\n": # checking for new line to start the next words in a new paragraph
+            cursor_y += VSTEP
+            cursor_x = HSTEP
+            continue
 
-    if status.startswith("3"):
-        if redirects >= 10:
-            print("TOO MANY REDIRECTS....")
-            return
-    
-        print("Redirecting to: {}".format(headers["location"]))
-        location = headers["location"]
-
-        if location.startswith("/"):
-            location = url.scheme + "://" + url.host + location
-
-        load(URL(location), redirects + 1)
-        return
+        display_list.append((cursor_x, cursor_y, c))
+        cursor_x += HSTEP
         
-    if url.view_source:
-        print(body)
-    else:
-        show(body=body)
+        if cursor_x > WIDTH - HSTEP:
+            cursor_y += VSTEP * 2
+            cursor_x = HSTEP
 
+    return display_list
+
+
+"""     **********        URL       **********       """
 class URL:
     def __init__(self, url):
         self.view_source = False
@@ -220,12 +227,93 @@ class URL:
                     CACHE[cache_key] = time.time(), status, response_headers, content
         
         return status, response_headers, content
+
+
+"""     **********        BROWSER       **********       """
+class Browser:
+    def __init__(self):
+        self.window = tkinter.Tk()
+        self.canvas = tkinter.Canvas(
+            self.window,
+            width=WIDTH,
+            height=HEIGHT
+        )
+        self.canvas.pack(fill=tkinter.BOTH, expand=True)
+
+        self.text = None
+
+        self.scroll = 0
+        self.window.bind("<Down>", self.scrollDown)
+        self.window.bind("<Up>",self.scrollUp)
+        self.window.bind("<MouseWheel>", self.mouseWheel)
+        self.window.bind("<Configure>", self.resize)
+
+    def draw(self):
+        self.canvas.delete("all")
+        for x,y,c in self.display_list:
+            if y > self.scroll + HEIGHT: continue
+            if y + VSTEP < self.scroll: continue
+            self.canvas.create_text(x, y - self.scroll, text=c)
+
+    def resize(self, e):
+        global WIDTH, HEIGHT
+        WIDTH = e.width
+        HEIGHT = e.height
+
+        if hasattr(self, "text"):
+            self.display_list = layout(self.text)
+            self.draw()
+
+    def scrollDown(self, e):
+        self.scroll += SCROLL_STEP
+        self.draw()
+
+    def scrollUp(self, e):
+        self.scroll -= SCROLL_STEP
+        if self.scroll < 0:
+            self.scroll = 0
+        self.draw()
     
+    def mouseWheel(self, e):
+        if e.delta < 0:
+            self.scrollDown(e)
+        else:
+            self.scrollUp(e)
+
+    def load(self, url, redirects=0):
+
+        status, headers, body = url.request()
+
+        if status.startswith("3"):
+            if redirects >= 10:
+                print("TOO MANY REDIRECTS....")
+                return
+        
+            print("Redirecting to: {}".format(headers["location"]))
+            location = headers["location"]
+
+            if location.startswith("/"):
+                location = url.scheme + "://" + url.host + location
+
+            self.load(URL(location), redirects + 1)
+            return
+            
+        if url.view_source:
+            print(body)
+        else:
+            self.text = lex(body=body)
+        
+        self.display_list = layout(self.text)
+        self.draw()
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
-        load(URL(sys.argv[1]))
+        Browser().load(URL(sys.argv[1]))
+        tkinter.mainloop()
     else:
-        # load(URL(DEFAULT_URL))
+        Browser().load(URL(DEFAULT_URL))
+        tkinter.mainloop()
         # load(URL("http://browser.engineering/http.html"))
-        load(URL("http://browser.engineering/http.html/http.html"))
+        # load(URL("http://browser.engineering/http.html/http.html"))
