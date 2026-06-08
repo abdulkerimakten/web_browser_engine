@@ -4,6 +4,8 @@ import os
 import time
 import gzip
 import tkinter
+import tkinter.font
+
 
 WIDTH, HEIGHT = 800, 600
 HSTEP, VSTEP = 13, 18
@@ -11,55 +13,167 @@ SCROLL_STEP = 100
 
 SOCKETS = {}
 CACHE = {}
+FONTS = {}
 
 DEFAULT_FILE = os.path.join(os.path.dirname(__file__), "test.html")
 DEFAULT_URL = "file:///" + DEFAULT_FILE.replace("\\", "/")
 
 
 
+"""     **********        STANDALONE CLASSES       **********       """
+
+class Text:
+    def __init__(self, text):
+        self.text = text
+
+class Tag:
+    def __init__(self, tag):
+        self.tag = tag
+
 """     **********        STANDALONE METHODS       **********       """
 
 def lex(body):
-    text = ""
+    out = []
+    buffer = ""
     in_tag = False
     i = 0
     while i < len(body):
         if body[i:i+4] == "&lt;": 
-            text += "<"
+            buffer += "<"
             i += 4
             continue
         elif body[i:i+4] == "&gt;":
-            text += ">"
+            buffer += ">"
             i += 4
             continue
         elif body[i] == "<":
             in_tag = True
+            if buffer:
+                out.append(Text(buffer))
+                buffer = ""
         elif body[i] == ">":
             in_tag = False
-        elif not in_tag:
-            text += body[i]
+            out.append(Tag(buffer))
+            buffer = ""
+        else:
+            buffer += body[i]
         i += 1
 
-    return text
+    if not in_tag and buffer:
+        out.append(Text(buffer))
 
-def layout(text):
+    return out
+
+
+def get_font(size, weight, style):
+    key = (size, weight, style)
+
+    if key not in FONTS:
+        font = tkinter.font.Font(
+            size=size,
+            weight=weight,
+            slant =style
+        )
+        label = tkinter.Label(font=font)
+        FONTS[key] = (font, label)
     
-    display_list = []
-    cursor_x, cursor_y = HSTEP, VSTEP
-    for c in text:
-        if c == "\n": # checking for new line to start the next words in a new paragraph
-            cursor_y += VSTEP
-            cursor_x = HSTEP
-            continue
+    return FONTS[key][0]
 
-        display_list.append((cursor_x, cursor_y, c))
-        cursor_x += HSTEP
+"""     **********        LAYOUT       **********       """
+
+
+class Layout:
+    def __init__(self, tokens, rtl):
+        self.display_list = []
+        self.cursor_x = HSTEP
+        self.cursor_y = VSTEP
+        self.weight = "normal"
+        self.style = "roman"
+        self.size = 12
+        self.rtl = rtl
+        # font = tkinter.font.Font()
+
+        # if rtl:
+        #     display_list = []
+        #     cursor_x, cursor_y = WIDTH, VSTEP
+        #     for tok in tokens:
+        #         if isinstance(tok, Text):
+        #             for word in tok.text.split():
+        #                 width_of_word = font.measure(word)
+                        
+        #                 if cursor_x < HSTEP:
+        #                     cursor_y += font.metrics("linespace") * 1.25
+        #                     cursor_x = WIDTH - HSTEP
+
+        #                 display_list.append((cursor_x, cursor_y, word, font))
+        #                 cursor_x -= width_of_word + font.measure(" ")
+        # WILL BE IMPLEMENTED !!!!!!!!!!
+        self.line = []
         
-        if cursor_x > WIDTH - HSTEP:
-            cursor_y += VSTEP * 2
-            cursor_x = HSTEP
+        for tok in tokens:
+            self.token(tok)
 
-    return display_list
+        self.flush()
+
+    def token(self, tok):
+        if isinstance(tok, Text):
+            for word in tok.text.split():
+                self.word(word)
+        elif tok.tag == "i":
+            self.style = "italic"
+        elif tok.tag == "/i":
+            self.style = "roman"
+        elif tok.tag == "b":
+            self.weight = "bold"
+        elif tok.tag == "/b":
+            self.weight = "normal"
+        elif tok.tag == "small":
+            self.size -= 2
+        elif tok.tag == "/small":
+            self.size += 2
+        elif tok.tag == "big":
+            self.size += 4
+        elif tok.tag == "/big":
+            self.size -= 4
+        elif tok.tag == "br":
+            self.flush()
+        elif tok.tag == "/p":
+            self.flush()
+            self.cursor_y += VSTEP
+
+
+    def word(self, word):
+
+        font = get_font(self.size, self.weight, self.style)
+        width_of_word = font.measure(word)
+                                     
+        if self.cursor_x + width_of_word > WIDTH - HSTEP:
+            self.flush()
+
+        self.line.append((self.cursor_x, word, font))
+        self.cursor_x += width_of_word +font.measure(" ")
+
+    def flush(self):
+        if not self.line: return
+        metrics = [font.metrics() for x, word, font in self.line]
+        max_ascent = max([metric["ascent"] for metric in metrics])
+
+        baseline = self.cursor_y + 1.25 * max_ascent
+
+        for x, word, font in self.line:
+            y = baseline - font.metrics("ascent")
+            self.display_list.append((x, y, word, font))
+
+        max_descent = max([metric["descent"] for metric in metrics])
+        self.cursor_y = baseline + 1.25 * max_descent
+
+        self.cursor_x = HSTEP
+        self.line = []
+
+    
+
+
+
 
 
 """     **********        URL       **********       """
@@ -67,43 +181,52 @@ class URL:
     def __init__(self, url):
         self.view_source = False
 
-        if url.startswith("view-source:"):
-            self.view_source = True
-            url = url[len("view-source:"):]
-        
-        if url.startswith("data:"):
-            self.scheme, url = url.split(":", 1)
-        else:
-            self.scheme, url = url.split("://", 1)
-
-        assert self.scheme in ["http", "https", "file", "data"]
-
-        if self.scheme == "data":
-            self.media, self.body = url.split(",", 1)
-            return
-        
-        elif self.scheme == "file":
-            self.path = url
-            if self.path.startswith("/") and self.path[2] == ":":
-                self.path = self.path[1:]
-            return
-        
-        else:
-            if "/" not in url:
-                url = url + "/"
-            self.host, url = url.split("/", 1)
-            self.path = "/" + url
-
-            if self.scheme == "http":
-                self.port = 80
-            elif self.scheme == "https":
-                self.port = 443
+        try:
+            if url.startswith("view-source:"):
+                self.view_source = True
+                url = url[len("view-source:"):]
             
-            if ":" in self.host:
-                self.host, port = self.host.split(":", 1)
-                self.port = int(port)
+            if url.startswith("data:"):
+                self.scheme, url = url.split(":", 1)
+            else:
+                self.scheme, url = url.split("://", 1)
+
+            assert self.scheme in ["http", "https", "file", "data"]
+
+            if self.scheme == "data":
+                self.media, self.body = url.split(",", 1)
+                return
+            
+            elif self.scheme == "file":
+                self.path = url
+                if self.path.startswith("/") and self.path[2] == ":":
+                    self.path = self.path[1:]
+                return
+            
+            else:
+                if "/" not in url:
+                    url = url + "/"
+                self.host, url = url.split("/", 1)
+                self.path = "/" + url
+
+                if self.scheme == "http":
+                    self.port = 80
+                elif self.scheme == "https":
+                    self.port = 443
+                
+                if ":" in self.host:
+                    self.host, port = self.host.split(":", 1)
+                    self.port = int(port)
+        except:
+            self.scheme = "about"
+            self.path = "blank"
+            
     
     def request(self):        
+        
+        if self.scheme == "about":
+            return "200", {}, ""
+
         if self.scheme == "data":
             content = self.body
             return "200", {}, content
@@ -231,7 +354,7 @@ class URL:
 
 """     **********        BROWSER       **********       """
 class Browser:
-    def __init__(self):
+    def __init__(self, rtl=False):
         self.window = tkinter.Tk()
         self.canvas = tkinter.Canvas(
             self.window,
@@ -240,7 +363,12 @@ class Browser:
         )
         self.canvas.pack(fill=tkinter.BOTH, expand=True)
 
-        self.text = None
+        self.tokens = None
+        self.font = None
+        self.display_list = None
+        self.rtl = rtl
+
+        self.emoji = tkinter.PhotoImage(file="emoji_grinning_16.png")
 
         self.scroll = 0
         self.window.bind("<Down>", self.scrollDown)
@@ -250,10 +378,36 @@ class Browser:
 
     def draw(self):
         self.canvas.delete("all")
-        for x,y,c in self.display_list:
+        if not self.display_list:
+            return
+        for x,y,c,font in self.display_list:
             if y > self.scroll + HEIGHT: continue
             if y + VSTEP < self.scroll: continue
-            self.canvas.create_text(x, y - self.scroll, text=c)
+            self.font = font
+            
+            if c == "😀":
+                self.canvas.create_image(x, y - self.scroll, image=self.emoji)
+            else:
+                self.canvas.create_text(x, y - self.scroll, text=c, font=self.font, anchor="nw")
+        
+        last_y = max(y for x, y, c, font in self.display_list)
+
+        document_height = last_y + VSTEP
+        viewport_height = HEIGHT
+
+        if document_height > viewport_height:
+            thumb_height = HEIGHT * (viewport_height / document_height)
+            thumb_y = HEIGHT * (self.scroll / document_height)
+
+            x1 = WIDTH - HSTEP
+            x2 = WIDTH
+            y1 = thumb_y
+            y2 = thumb_y + thumb_height
+
+            self.canvas.create_rectangle(x1,y1,x2,y2, fill="blue")
+
+
+
 
     def resize(self, e):
         global WIDTH, HEIGHT
@@ -261,11 +415,19 @@ class Browser:
         HEIGHT = e.height
 
         if hasattr(self, "text"):
-            self.display_list = layout(self.text)
+            self.display_list = Layout(self.text, self.rtl).display_list
             self.draw()
 
     def scrollDown(self, e):
+        if not self.display_list:
+            return
+        last_y = max(y for x, y, c, font in self.display_list)
+        max_scroll = max(0, last_y + VSTEP - HEIGHT)
+
         self.scroll += SCROLL_STEP
+
+        if self.scroll > max_scroll:
+            self.scroll = max_scroll
         self.draw()
 
     def scrollUp(self, e):
@@ -299,21 +461,27 @@ class Browser:
             return
             
         if url.view_source:
-            print(body)
+            self.tokens = body
         else:
-            self.text = lex(body=body)
+            self.tokens = lex(body=body)
         
-        self.display_list = layout(self.text)
+        self.display_list = Layout(self.tokens, self.rtl).display_list
         self.draw()
 
 
 if __name__ == "__main__":
     import sys
+
+    rtl = False # for the cases that alternate text direction may need
+    if "--rtl" in sys.argv:
+        rtl = True
+        sys.argv.remove("--rtl")
+
     if len(sys.argv) > 1:
-        Browser().load(URL(sys.argv[1]))
+        Browser(rtl).load(URL(sys.argv[1]))
         tkinter.mainloop()
     else:
-        Browser().load(URL(DEFAULT_URL))
+        Browser(rtl).load(URL(DEFAULT_URL))
         tkinter.mainloop()
         # load(URL("http://browser.engineering/http.html"))
         # load(URL("http://browser.engineering/http.html/http.html"))
