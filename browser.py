@@ -62,6 +62,9 @@ def lex(body):
     if not in_tag and buffer:
         out.append(Text(buffer))
 
+    for item in out:
+        print(type(item), getattr(item, "text", None), getattr(item, "tag", None))
+
     return out
 
 
@@ -108,6 +111,7 @@ class Layout:
         #                 display_list.append((cursor_x, cursor_y, word, font))
         #                 cursor_x -= width_of_word + font.measure(" ")
         # WILL BE IMPLEMENTED !!!!!!!!!!
+        
         self.line = []
         
         for tok in tokens:
@@ -140,6 +144,11 @@ class Layout:
         elif tok.tag == "/p":
             self.flush()
             self.cursor_y += VSTEP
+        elif tok.tag.startswith("h1") and 'class="title"' in tok.tag:
+            print(True)
+        elif tok.tag == "/h1":
+            print(False)
+        
 
 
     def word(self, word):
@@ -414,8 +423,8 @@ class Browser:
         WIDTH = e.width
         HEIGHT = e.height
 
-        if hasattr(self, "text"):
-            self.display_list = Layout(self.text, self.rtl).display_list
+        if hasattr(self, "tokens"):
+            self.display_list = Layout(self.tokens, self.rtl).display_list
             self.draw()
 
     def scrollDown(self, e):
