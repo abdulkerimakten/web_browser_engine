@@ -110,7 +110,7 @@ class Layout:
 
         #                 display_list.append((cursor_x, cursor_y, word, font))
         #                 cursor_x -= width_of_word + font.measure(" ")
-        # WILL BE IMPLEMENTED !!!!!!!!!!
+        # WILL BE IMPLEMENTED LATER !!!!!!!!!!
         
         self.line = []
         
