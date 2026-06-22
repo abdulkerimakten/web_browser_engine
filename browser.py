@@ -46,6 +46,10 @@ def lex(body):
             buffer += ">"
             i += 4
             continue
+        elif body[i:i+5] == "&shy;":
+            buffer +="\u00ad"
+            i += 5
+            continue
         elif body[i] == "<":
             in_tag = True
             if buffer:
@@ -68,11 +72,12 @@ def lex(body):
     return out
 
 
-def get_font(size, weight, style):
-    key = (size, weight, style)
+def get_font(size, weight, style, family="Times"):
+    key = (size, weight, style, family)
 
     if key not in FONTS:
         font = tkinter.font.Font(
+            family=family,
             size=size,
             weight=weight,
             slant =style
@@ -81,6 +86,26 @@ def get_font(size, weight, style):
         FONTS[key] = (font, label)
     
     return FONTS[key][0]
+
+def longest_fit(parts, cursor_x, font):
+    current = ""
+    last_fit = ""
+    fit_count = 0
+
+    for part in parts[:-1]:
+        candidate = current + part + "-"
+
+        if cursor_x + font.measure(candidate) > WIDTH - HSTEP:
+            break
+    
+        current += part
+        last_fit = current
+        fit_count += 1
+    
+    return last_fit, fit_count
+
+
+
 
 """     **********        LAYOUT       **********       """
 
@@ -93,6 +118,7 @@ class Layout:
         self.weight = "normal"
         self.style = "roman"
         self.size = 12
+        self.superscript = False
         self.rtl = rtl
         # font = tkinter.font.Font()
 
@@ -113,6 +139,9 @@ class Layout:
         # WILL BE IMPLEMENTED LATER !!!!!!!!!!
         
         self.line = []
+        self.centered = False
+        self.abbr = False
+        self.preformat = False
         
         for tok in tokens:
             self.token(tok)
@@ -121,8 +150,12 @@ class Layout:
 
     def token(self, tok):
         if isinstance(tok, Text):
-            for word in tok.text.split():
-                self.word(word)
+            if self.preformat:
+                for c in tok.text:
+                    self.character(c)
+            else:
+                for word in tok.text.split():
+                    self.word(word)
         elif tok.tag == "i":
             self.style = "italic"
         elif tok.tag == "/i":
@@ -145,32 +178,121 @@ class Layout:
             self.flush()
             self.cursor_y += VSTEP
         elif tok.tag.startswith("h1") and 'class="title"' in tok.tag:
-            print(True)
+            self.centered = True
         elif tok.tag == "/h1":
-            print(False)
+            self.flush()
+            self.centered = False
+        elif tok.tag == "sup":
+            self.superscript = True
+        elif tok.tag == "/sup":
+            self.superscript = False
+        elif tok.tag == "abbr":
+            self.abbr = True
+        elif tok.tag == "/abbr":
+            self.abbr = False
+        elif tok.tag == "pre":
+            self.flush()
+            self.preformat = True
+        elif tok.tag == "/pre":
+            self.flush()
+            self.preformat = False
+
         
 
+    def character(self, c):
+        font = get_font(self.size, self.weight, self.style, family="Courier New")
+
+        if c == "\n":
+            self.flush()
+            return
+        
+        self.line.append((self.cursor_x, c, font, self.superscript))
+        self.cursor_x += font.measure(c)
 
     def word(self, word):
+        if self.abbr:
+            for c in word:
+                if c.islower():
+                    char = c.upper()
+                    font = get_font(self.size - 2, "bold", self.style)
+                else:
+                    char = c
+                    font = get_font(self.size, self.weight, self.style)
 
-        font = get_font(self.size, self.weight, self.style)
-        width_of_word = font.measure(word)
-                                     
-        if self.cursor_x + width_of_word > WIDTH - HSTEP:
-            self.flush()
+                width = font.measure(char)
 
-        self.line.append((self.cursor_x, word, font))
-        self.cursor_x += width_of_word +font.measure(" ")
+                if self.cursor_x + width > WIDTH - HSTEP:
+                    self.flush()
+                
+                self.line.append((self.cursor_x, char, font, self.superscript))
+                self.cursor_x += width
+            self.cursor_x += get_font(self.size, self.weight, self.style).measure(" ")
+            return                    
+        else:
+            size = self.size
+
+            if self.superscript:
+                size = self.size // 2
+            
+
+            font = get_font(size, self.weight, self.style)
+            
+            visible_word = word.replace("\u00ad", "")
+            width_of_word = font.measure(visible_word)
+
+            
+            if self.cursor_x + width_of_word > WIDTH - HSTEP:  
+                if "\u00ad" not in word:
+                    self.flush()
+                else:
+                    remaining = word
+                    while "\u00ad" in remaining:
+                        parts = remaining.split("\u00ad")
+                        fit, idx = longest_fit(parts, self.cursor_x, font)
+
+                        if fit == "":
+                            self.flush()
+                            fit, idx = longest_fit(parts, self.cursor_x, font)
+                            
+                        
+
+                        self.line.append((self.cursor_x, fit + "-", font, self.superscript))
+                        self.flush()
+
+
+                        remaining = "\u00ad".join(parts[idx:])
+                        self.word(remaining)
+                        return
+
+            self.line.append((self.cursor_x, visible_word, font, self.superscript))
+            self.cursor_x += width_of_word +font.measure(" ")
 
     def flush(self):
+        
         if not self.line: return
-        metrics = [font.metrics() for x, word, font in self.line]
+
+        offset = 0
+
+        if self.centered:
+            last_x, last_word, last_font, superscript = self.line[-1]
+            first_x, _, _, _ = self.line[0]
+
+            line_width = last_x + last_font.measure(last_word) - first_x
+
+            offset = (WIDTH - line_width) / 2 - first_x
+
+        
+        metrics = [font.metrics() for x, word, font, sup in self.line]
         max_ascent = max([metric["ascent"] for metric in metrics])
 
         baseline = self.cursor_y + 1.25 * max_ascent
 
-        for x, word, font in self.line:
-            y = baseline - font.metrics("ascent")
+        for x, word, font, sup in self.line:
+            if sup:
+                y = baseline - max_ascent
+            else:
+                y = baseline - font.metrics("ascent")
+            x = x + offset
             self.display_list.append((x, y, word, font))
 
         max_descent = max([metric["descent"] for metric in metrics])

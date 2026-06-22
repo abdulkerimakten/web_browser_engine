@@ -5,18 +5,61 @@
     <title>Browser Test Page</title>
 </head>
 <body>
-    <h1 class="title"><b><i>HELLLLOO</i></b>Kerim!</h1>
-    <p>This is a simple <b>HTML</b> test <small>small</small>content for the <b>browser project</b> you are developing.</p>
-    
-    <div>
-        <h2>Feature List</h2>
-        <ul>
-            <li>HTTP and HTTPS Support</li>
-            <li>Socket Connection</li>
-            <li>HTML Tag Stripping</li>
-        </ul>
-    </div>
+    <h1 class="title"><b><i>Browser Engine</i></b> Test Page</h1>
 
-    <p>If you can see this text, your parsing logic is <small>a</small> <big>A</big> working correctly.</p>
+    <p>
+        Normal text and <abbr>html</abbr> and
+        <abbr>HTTP</abbr> and
+        <abbr>Html5</abbr>.
+    </p>
+
+    <p>
+        This is a simple <b>HTML</b> and also    test with
+        <i>italic</i>, <b>bold</b>, <small>small</small>,
+        <big>big</big>, and normal<sup>2</sup> text.
+    </p>
+
+    <p>
+        Soft hyphen test:
+        super&shy;cali&shy;fragi&shy;listic&shy;expi&shy;ali&shy;docious
+    </p>
+
+    <p>
+        Feature List<br>
+        HTTP and HTTPS Support<br>
+        Socket Connection<br>
+        HTML Tag Parsing<br>
+        Word wrapping and layout
+    </p>
+
+    <p>
+        Mixed inline formatting:
+        normal <b>bold <i>bold italic</i></b> normal again.
+    </p>
+
+    <p>
+        If you can see this text, your parsing and layout logic is working correctly.
+    </p>
+
+    <h2>Preformatted Text Test</h2>
+
+    <pre>
+    def hello():
+        print("Hello World")
+
+    for i in range(5):
+        print(i)
+
+
+    if x &gt; 10:
+        print("Large")
+    else:
+        print("Small")
+    </pre>
+
+    <p>
+        Normal text after pre block. This paragraph should still wrap normally and collapse
+        multiple            spaces.
+    </p>
 </body>
 </html>
